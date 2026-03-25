@@ -1,103 +1,103 @@
 <?php
-// Sử dụng đường dẫn tuyệt đối để tránh lỗi Failed to open stream
-require_once __DIR__ . '/../model/ProductModel.php';
+require_once 'model/ProductModel.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 class ProductController {
     private $model;
 
-    public function __construct() {
-        $this->model = new ProductModel();
+    public function __construct() { 
+        $this->model = new ProductModel(); 
     }
 
-    /**
-     * Hiển thị danh sách sản phẩm
-     */
     public function index() {
-        // Lấy danh sách từ Model
-        $allProducts = $this->model->getAll();
-        
-        // Đảo ngược để sản phẩm mới thêm lên đầu
-        $products = array_reverse($allProducts);
-        
-        require_once __DIR__ . '/../view/product_list.php';
+        $list = $this->model->getAll();
+        include 'view/product_list.php';
     }
 
-    /**
-     * Thêm sản phẩm mới
-     */
-    public function create() {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            // Trim dữ liệu để tránh khoảng trắng dư thừa
-            $data = [
-                'name'    => trim($_POST['name'] ?? ''),
-                'brand'   => trim($_POST['brand'] ?? ''),
-                'price'   => (int)($_POST['price'] ?? 0),
-                'weight'  => trim($_POST['weight'] ?? ''),
-                'surface' => trim($_POST['surface'] ?? '')
-            ];
-
-            // Validate cơ bản: Không được để trống tên và giá phải dương
-            if (!empty($data['name']) && $data['price'] > 0) {
-                $this->model->add($data);
-                header("Location: index.php?msg=add_success");
-                exit();
-            } else {
-                $error = "Vui lòng nhập đầy đủ thông tin sản phẩm và giá hợp lệ!";
-            }
-        }
-        require_once __DIR__ . '/../view/product_add.php';
-    }
-
-    /**
-     * Chỉnh sửa sản phẩm
-     */
-    public function edit() {
-        $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+    public function add_to_cart() {
+        $id = $_GET['id'] ?? null;
         $product = $this->model->getById($id);
-        
-        // Nếu không tìm thấy sản phẩm, quay về trang chủ
-        if (!$product) {
-            header("Location: index.php?msg=not_found");
-            exit();
-        }
-
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $data = [
-                'name'    => trim($_POST['name'] ?? ''),
-                'brand'   => trim($_POST['brand'] ?? ''),
-                'price'   => (int)($_POST['price'] ?? 0),
-                'weight'  => trim($_POST['weight'] ?? ''),
-                'surface' => trim($_POST['surface'] ?? '')
-            ];
-
-            if (!empty($data['name'])) {
-                $this->model->update($id, $data);
-                header("Location: index.php?msg=update_success");
-                exit();
+        if ($product) {
+            if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
+            if (isset($_SESSION['cart'][$id])) {
+                $_SESSION['cart'][$id]['quantity']++;
             } else {
-                $error = "Tên sản phẩm không được để trống!";
+                $_SESSION['cart'][$id] = [
+                    'name' => $product['name'],
+                    'price' => $product['price'],
+                    'image' => $product['image'],
+                    'quantity' => 1
+                ];
             }
         }
-        
-        require_once __DIR__ . '/../view/product_edit.php';
+        header('Location: index.php');
+        exit();
     }
 
-    /**
-     * Xóa sản phẩm
-     */
-    public function delete() {
-        $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-        
-        if ($id > 0) {
-            $result = $this->model->delete($id);
-            if ($result) {
-                header("Location: index.php?msg=delete_success");
-            } else {
-                header("Location: index.php?msg=error");
+    public function view_cart() {
+        $cart = $_SESSION['cart'] ?? [];
+        include 'view/cart_detail.php';
+    }
+
+    // HÀM QUAN TRỌNG ĐỂ HẾT LỖI GẠCH ĐỎ
+    public function update_cart() {
+        $id = $_GET['id'] ?? null;
+        $type = $_GET['type'] ?? 'increase';
+        if (isset($_SESSION['cart'][$id])) {
+            if ($type === 'increase') $_SESSION['cart'][$id]['quantity']++;
+            else {
+                $_SESSION['cart'][$id]['quantity']--;
+                if ($_SESSION['cart'][$id]['quantity'] <= 0) unset($_SESSION['cart'][$id]);
             }
-        } else {
-            header("Location: index.php");
         }
+        header('Location: index.php?action=view_cart');
         exit();
+    }
+
+    // HÀM QUAN TRỌNG ĐỂ HẾT LỖI GẠCH ĐỎ
+    public function remove_from_cart() {
+        $id = $_GET['id'] ?? null;
+        if (isset($_SESSION['cart'][$id])) unset($_SESSION['cart'][$id]);
+        header('Location: index.php?action=view_cart');
+        exit();
+    }
+
+    public function add() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $imagePath = 'assets/images/default.jpg';
+            if (isset($_FILES['image']) && $_FILES['image']['error'] === 0) {
+                $uploadDir = 'assets/images/';
+                if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
+                $fileName = time() . '_' . basename($_FILES['image']['name']);
+                $targetPath = $uploadDir . $fileName;
+                if (move_uploaded_file($_FILES['image']['tmp_name'], $targetPath)) $imagePath = $targetPath;
+            }
+            $data = $_POST; $data['image'] = $imagePath;
+            $this->model->save($data);
+            header('Location: index.php'); exit();
+        } else include 'view/product_add.php';
+    }
+
+    public function edit() {
+        $id = $_GET['id'] ?? null;
+        $product = $this->model->getById($id);
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $imagePath = $product['image'];
+            if (isset($_FILES['image']) && $_FILES['image']['error'] === 0) {
+                $fileName = time() . '_' . basename($_FILES['image']['name']);
+                if (move_uploaded_file($_FILES['image']['tmp_name'], 'assets/images/' . $fileName)) $imagePath = 'assets/images/' . $fileName;
+            }
+            $data = $_POST; $data['image'] = $imagePath;
+            $this->model->update($id, $data);
+            header('Location: index.php'); exit();
+        } else include 'view/product_edit.php';
+    }
+
+    public function delete() {
+        $this->model->delete($_GET['id'] ?? null);
+        header('Location: index.php'); exit();
     }
 }
